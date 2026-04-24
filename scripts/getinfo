@@ -1,0 +1,65 @@
+#!/bin/zsh
+################################################################################
+# Script Name:       sysmon-quick
+# Description:       Lightweight system resource monitor for rapid extraction 
+#                    of CPU frequency, RAM utilization, and root storage metrics.
+# Author:            Stefan
+# Version:           1.0
+# Last Modified:     2026-04-24
+# Dependencies:      zsh, s-tui, ripgrep (rg), sed, awk, procps (free)
+# Hardware:          Linux-based systems with sysfs/procfs access
+################################################################################
+
+# ==============================================================================
+# FUNCTIONALITY OVERVIEW
+# ==============================================================================
+# 1. Provides a CLI interface to query specific hardware subsystems via flags.
+# 2. Freq: Interfaces with s-tui to capture live average CPU frequency using 
+#    regex extraction for precise numeric values.
+# 3. RAM: Parses the 'free' command output to display used memory, filtering 
+#    through awk and sanitizing units via sed.
+# 4. Storage: Queries disk filesystem usage (df), isolates the root partition 
+#    mount point, and extracts available space.
+# ==============================================================================
+
+if [[ $1 = "" ]];then
+    echo "Specify device to get info from (freq/ram/storage)"
+else
+    case $1 in
+        "freq")
+            # Uses s-tui in terminal mode (-t) to get frequency snapshots
+            # Extracts the 'Avg' metric via ripgrep and cleans the string with sed
+            s-tui -t | rg -oe "Avg: \d{4}\.\d" | sed 's/Avg: //g'
+        ;;
+        "ram")
+            # Displays memory in human-readable format (-h)
+            # awk filters for the 'Mem:' row and extracts the 'Used' column
+            free -h | awk '/Mem:/ { print $3 } /buffers\/cache/ { print $3 }' | sed 's/i//g'
+        ;;
+        "storage")
+            # Checks disk space and uses ripgrep to target the root (/) mount point
+            # Appends 'B' suffix to indicate byte-scale units (G/M/K)
+            echo $(df -h | rg -e "\s/$" | awk '/\s/{print $4}')B
+        ;;
+    esac
+fi
+
+# ==============================================================================
+# SECURITY CONSIDERATIONS
+# ==============================================================================
+# 1. SIDE-CHANNEL LEAKAGE: High-frequency monitoring of CPU usage (freq) can 
+#    theoretically be used in power-analysis side-channel attacks to infer 
+#    cryptographic operations.
+# 2. PRIVILEGE REQUIREMENTS: 's-tui' may require elevated permissions to 
+#    access certain hardware sensors on hardened kernels. Ensure the user 
+#    is in the 'video' or 'hwmon' group instead of using 'sudo'.
+# 3. INPUT VALIDATION: While the 'case' statement is safe, ensure that 
+#    additional features do not use $1 in an 'eval' context, which could 
+#    lead to command injection.
+# 4. INFORMATION GATHERING: This script acts as a local reconnaissance tool. 
+#    In a compromised environment, such scripts are used by attackers to 
+#    identify system constraints before launching resource-heavy exploits.
+# 5. TOOL AVAILABILITY: Relies on non-standard tools like 's-tui' and 'rg'. 
+#    For production-level security monitoring, use native 'ip' or 'vmstat' 
+#    to minimize the attack surface of third-party binaries.
+# ==============================================================================

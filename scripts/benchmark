@@ -1,0 +1,87 @@
+#!/bin/zsh
+################################################################################
+# Script Name:       io-bench
+# Description:       Disk I/O performance benchmark utility. Measures sequential 
+#                    read and write speeds using 'dd' with a 1.0GB workload and 
+#                    4k block size to simulate standard filesystem operations.
+# Author:            Stefan
+# Version:           1.0
+# Last Modified:     2026-04-24
+# Dependencies:      zsh, dd, sudo, awk
+# Hardware:          Requires write permissions on the target storage medium
+################################################################################
+
+# ==============================================================================
+# FUNCTIONALITY OVERVIEW
+# ==============================================================================
+# 1. Validates and sanitizes the target directory path provided via arguments.
+# 2. Performs a Write Benchmark: Generates a 1GB file ('zero') from /dev/zero 
+#    using 4k blocks (262,144 iterations).
+# 3. Performs a Read Benchmark: Reads the previously created 'zero' file 
+#    back into /dev/zero to measure throughput without disk caching impact.
+# 4. Uses advanced awk parsing to extract the transfer rate (e.g., MB/s) from 
+#    the standard error output of the 'dd' command.
+# 5. Executes a cleanup routine to remove the benchmark file and unsets 
+#    performance variables to maintain environment hygiene.
+# ==============================================================================
+
+echo "==========================="
+echo "1.0GB I/O benchmark (4k bs)"
+echo "==========================="
+
+# Path selection and sanitization logic
+if [[ $1 = "" ]]; then 1=.; fi
+# Append trailing slash if missing for consistency
+if ! [[ $(echo "${1: -1}") = "/" ]]; then 1=$1/; fi
+
+# Verify directory existence and change context if necessary
+if ! [ -d $1 ]; then 
+    echo "Please input a valid path."
+    exit
+else
+    if ! [[ $1 = "./" ]]; then 
+        cd $1
+        echo "Selected location: $(pwd)"
+    fi
+fi
+
+# Write Benchmark
+# bs=4k is chosen as it matches many filesystem block sizes for realistic results
+echo "Testing writing speeds.."
+write=$(sudo dd if=/dev/zero of=zero bs=4k count=262144 |& tail -1 | awk 'NF&&NF-1{print($(NF-1)$NF)}')
+
+# Read Benchmark
+echo "Testing reading speeds.."
+read=$(sudo dd if=zero of=/dev/zero bs=4k count=262144 |& tail -1 | awk 'NF&&NF-1{print($(NF-1)$NF)}')
+
+# Cleanup phase to prevent storage bloat
+echo "Cleaning up.."
+sudo rm zero
+
+# Final Result Output
+echo "==========================="
+echo "READ: $read"
+echo "WRITE: $write"
+
+# Clean up environment variables
+unset read
+unset write
+
+# ==============================================================================
+# SECURITY CONSIDERATIONS
+# ==============================================================================
+# 1. PRIVILEGE ESCALATION: The script uses 'sudo dd'. If the 'zero' file is 
+#    redirected to a sensitive system path (e.g., /dev/sda), it can cause 
+#    catastrophic data loss or overwrite the Master Boot Record (MBR).
+# 2. DENIAL OF SERVICE (Disk Exhaustion): Creating a 1GB file on a nearly full 
+#    partition can crash system services that require log space. Ensure 
+#    adequate quota before execution.
+# 3. WEAR AND TEAR: Repeatedly running I/O benchmarks on SSD/NVMe drives 
+#    contributes to NAND flash degradation. Use sparingly on production hardware.
+# 4. TMP FILE INTEGRITY: The file name 'zero' is static. If a symbolic link 
+#    named 'zero' exists in the target directory pointing to a system file, 
+#    'dd' will overwrite the linked file with root privileges.
+# 5. DATA RESIDUE: While 'rm' is used, the 1GB of data written to disk is 
+#    not securely wiped. On shared storage, this data could potentially 
+#    be recovered until the blocks are overwritten by the OS.
+# ==============================================================================

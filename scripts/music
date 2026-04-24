@@ -1,0 +1,16 @@
+#!/bin/zsh
+#!/run/current-system/sw/bin/zsh
+
+mkdir mp3 tmp
+
+for f in *.flac
+do
+#	ffmpeg -i $f -an -c:v copy tmp/artwork.png
+#	convert tmp/artwork.png -resize 196x196 tmp/artwork.jpg
+#	rm tmp/artwork.png
+#	ffmpeg -i $f -i tmp/artwork.jpg -acodec libmp3lame -ac 2 -ab 320k -ar 48000 -map 0:0 -map 1:0 "mp3/${f%.*}.mp3"
+	ffmpeg -i $f -acodec libmp3lame -ac 2 -ab 128k -ar 44100 -map 0:0 "mp3/${f%.*}.mp3"
+#	rm tmp/artwork.jpg
+done
+
+rm -rf tmp

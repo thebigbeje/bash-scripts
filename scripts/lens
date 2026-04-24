@@ -1,0 +1,70 @@
+#!/bin/zsh
+################################################################################
+# Script Name:       ocr-to-clipboard
+# Description:       High-accuracy Screen-to-Text utility. Captures a selected 
+#                    screen region, optimizes the image for OCR, and extracts 
+#                    text directly into the system clipboard.
+# Author:            Stefan
+# Version:           1.1
+# Last Modified:     2026-04-24
+# Dependencies:      zsh, tesseract-ocr, imagemagick, spectacle, xsel
+# Hardware:          Requires a GUI environment (KDE/Spectacle or equivalent)
+################################################################################
+
+# ==============================================================================
+# FUNCTIONALITY OVERVIEW
+# ==============================================================================
+# 1. Creates a secure temporary image path using 'mktemp'.
+# 2. Utilizes 'spectacle' in background region mode (-brc) to capture an area 
+#    and save it directly to the temporary file.
+# 3. Executes ImageMagick 'mogrify' for pre-OCR conditioning:
+#    - Desaturates to grayscale (-modulate 100,0) to sharpen text edges.
+#    - Upscales by 400% to provide Tesseract with higher pixel density.
+# 4. Processes the image through Tesseract OCR to generate a .txt file.
+# 5. Pipes the final text into 'xsel' for immediate use in other applications.
+# 6. Implements a 'trap' to ensure the temporary image and text files are
+#    securely deleted upon script termination or interruption.
+# ==============================================================================
+
+# Default language for OCR engine
+tesseract_lang=eng
+
+# Initialize temporary file and set up automatic cleanup
+SCR_IMG='mktemp'
+trap "rm $SCR_IMG*" EXIT
+
+# Capture screen region using Spectacle (KDE)
+# -b: Background, -r: Region, -c: Copy to clipboard (redundant here), -o: Output
+spectacle -brc -o $SCR_IMG.png
+
+# Image preprocessing to significantly increase Tesseract detection rate
+# Resizing is critical for accurate recognition of small or low-DPI screen fonts
+mogrify -modulate 100,0 -resize 400% $SCR_IMG.png
+
+# Perform Optical Character Recognition (OCR)
+# Standard output and error are suppressed to maintain clean terminal output
+tesseract $SCR_IMG.png $SCR_IMG &> /dev/null
+
+# Read extracted text and load into the primary clipboard buffer
+cat $SCR_IMG.txt | xsel -bi
+
+exit
+
+# ==============================================================================
+# SECURITY CONSIDERATIONS
+# ==============================================================================
+# 1. CLIPBOARD DATA PERSISTENCE: Data copied via 'xsel' remains in memory. If 
+#    sensitive information is captured, it could be read by any other 
+#    unprivileged application running in the same user session.
+# 2. TMP FILE VULNERABILITY: Although 'mktemp' is used, some older versions of 
+#    /tmp managers may not restrict file permissions sufficiently. 
+#    Sensitive screenshots could be briefly readable by other local users.
+# 3. COMMAND INJECTION: The use of backticks for `mktemp` is legacy. Modern 
+#    Zsh/Bash scripts should use $(mktemp) to avoid nested quoting issues.
+# 4. BINARY TRUST: The script relies on several external binaries. In a 
+#    Cybersecurity role, it is recommended to use absolute paths (e.g., 
+#    /usr/bin/tesseract) to prevent PATH-based binary hijacking.
+# 5. PIXELS-TO-PII: OCR engines can capture and digitize text that was 
+#    previously only "visible," potentially bypassing data loss prevention 
+#    (DLP) tools that only scan text files and not images.
+# ==============================================================================

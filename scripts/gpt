@@ -1,0 +1,77 @@
+#!/bin/zsh
+################################################################################
+# Script Name:       ocr-gpt-assistant
+# Description:       Advanced OCR-to-GPT workflow. Captures a screen area, 
+#                    processes the image for optimal character recognition, 
+#                    extracts text via Tesseract, and queries an AI model (GPT) 
+#                    for real-time assistance or problem-solving.
+# Author:            Stefan
+# Version:           1.0
+# Last Modified:     2026-04-24
+# Dependencies:      zsh, tesseract-ocr, imagemagick, gnome-screenshot, xsel, 
+#                    libnotify-bin, terminal-gpt (custom CLI tool)
+# Hardware:          Requires X11/Wayland display server for screen capture
+################################################################################
+
+# ==============================================================================
+# FUNCTIONALITY OVERVIEW
+# ==============================================================================
+# 1. Initializes a secure temporary workspace using 'mktemp' for image handling.
+# 2. Invokes a GUI-based area selector (gnome-screenshot) to capture targeted data.
+# 3. Applies ImageMagick (mogrify) preprocessing:
+#    - Modulate: Converts to grayscale to enhance contrast.
+#    - Resize: Scales image to 400% to improve OCR accuracy for small fonts.
+# 4. Executes Tesseract OCR engine to transform the image into raw text.
+# 5. Automatically copies the extracted text to the system clipboard via xsel.
+# 6. Forwards the text to 'terminal-gpt' with a custom prompt and displays 
+#    the AI's response via system notifications (notify-send).
+# ==============================================================================
+
+tesseract_lang=eng
+
+# Create a secure temporary file for the screenshot
+SCR_IMG=$(mktemp)
+# Ensure cleanup of all generated temp files (.png, .txt) on script exit
+trap "rm $SCR_IMG*" EXIT
+
+# Capture a user-defined area of the screen
+gnome-screenshot -a -f "$SCR_IMG.png"
+
+# Image Preprocessing for OCR optimization
+# Grayscale conversion and significant upscaling reduce noise and aid Tesseract
+mogrify -modulate 100,0 -resize 400% "$SCR_IMG.png"
+
+# Run OCR and suppress standard output/error
+tesseract "$SCR_IMG.png" "$SCR_IMG" &> /dev/null
+
+# Copy extracted text to clipboard (Selection and Board buffers)
+cat "$SCR_IMG.txt" | xsel -bi
+
+# Query AI assistant using the extracted text as context
+notification_text=$(terminal-gpt "what is the correct answer? $(cat "$SCR_IMG.txt")")
+
+# Output response to terminal and system notification daemon
+echo "$notification_text"
+notify-send "$notification_text"
+
+exit
+
+# ==============================================================================
+# SECURITY CONSIDERATIONS
+# ==============================================================================
+# 1. SENSITIVE DATA EXPOSURE: OCR scripts can inadvertently capture passwords, 
+#    API keys, or PII from the screen. Sending this data to a 3rd-party LLM 
+#    (GPT) may violate data privacy policies or expose secrets.
+# 2. CLIPBOARD HIJACKING: The script automatically populates 'xsel'. A 
+#    malicious OCR capture could overwrite important clipboard data or 
+#    execute "paste-jacking" if the user pastes into a terminal.
+# 3. TEMP FILE RESIDUE: While 'trap' is used, an ungraceful system crash or 
+#    SIGKILL could leave sensitive screenshot fragments in /tmp/. Using a 
+#    RAM-backed filesystem (tmpfs) is recommended.
+# 4. REMOTE API TRUST: 'terminal-gpt' likely communicates over HTTPS. Ensure 
+#    it validates SSL certificates and that the prompt injection (from the 
+#    cat command) cannot manipulate the underlying API call.
+# 5. ACCESS CONTROL: Any process with access to this script can trigger 
+#    screen captures. Ensure the script permissions are restricted (700) to 
+#    prevent unauthorized monitoring of the user's workspace.
+# ==============================================================================

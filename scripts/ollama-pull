@@ -1,0 +1,114 @@
+#!/bin/zsh
+################################################################################
+# Script Name:       ollama-puller
+# Description:       Batch downloader for Ollama AI models with support for 
+#                    inline arguments and file-based model lists.
+# Author:            Stefan
+# Version:           1.0
+# Last Modified:     2026-04-24
+# Dependencies:      zsh, ollama, tr
+# Hardware:          Requires significant disk space and active internet
+################################################################################
+
+# ==============================================================================
+# FUNCTIONALITY OVERVIEW
+# ==============================================================================
+# 1. Configures robust error handling using 'set -eo pipefail' to ensure the 
+#    script stops on unexpected command failures.
+# 2. Implements a flexible input parser that handles:
+#    - File-based lists via the '-f' flag.
+#    - Direct file paths as a single argument.
+#    - Multiple model names passed as individual CLI arguments.
+# 3. Iterates through the model array and interfaces with the Ollama service
+#    to pull the requested weights.
+# 4. Provides real-time color-coded feedback on the status of each download.
+# ==============================================================================
+
+# Define color variables for better readability
+WHITE='\033[1;37m'
+GREEN='\033[1;32m'
+RED='\033[1;31m'
+ORANGE='\033[1;33m'
+RESET='\033[0m'
+
+# Shell Safety: Exit on error (-e) and ensure pipe failures are caught (-o pipefail)
+set -eo pipefail
+
+models=()
+
+# Parse options using getopts
+while getopts "f:" opt; do
+    case $opt in
+        f)
+            if [ -f "$OPTARG" ]; then
+                # Convert file lines into a flat Zsh array
+                models=($(cat "$OPTARG" | tr '\n' ' '))
+            else
+                echo -e "${RED}Error: File '$OPTARG' not found${RESET}"
+                exit 1
+            fi
+            break
+            ;;
+    esac
+done
+
+# Shift off the options already processed by getopts
+shift $((OPTIND -1))
+
+# Logic to handle remaining positional arguments
+if [ $# -gt 0 ]; then
+    # Scenario: If no -f flag was used but a single argument is a file, read it
+    if [ ${#models[@]} -eq 0 ] && [ $# -eq 1 ]; then
+        arg="$1"
+        if [ -f "$arg" ]; then
+            models=($(cat "$arg" | tr '\n' ' '))
+        else
+            models+=("$arg")
+        fi
+    else
+        # Scenario: Treat all remaining arguments as model names
+        while [ $# -gt 0 ]; do
+            arg="$1"
+            models+=("$arg")
+            shift
+        done
+    fi
+fi
+
+# Validation: Ensure the models array is not empty
+if [ ${#models[@]} -eq 0 ]; then
+    echo -e "${RED}No AI models or files specified${RESET}"
+    exit 1
+fi
+
+# Main Loop: Execute the pull command for each identified model
+for model in $models; do
+    echo -e "${ORANGE}Attempting to download AI model: ${model}${RESET}"
+    
+    if ollama pull "$model"; then
+        echo -e "${GREEN}Successfully downloaded ${model} AI model${RESET}"
+    else
+        # Note: 'set -e' might terminate the script here depending on ollama's exit code
+        echo -e "${RED}Failed to download ${model}${RESET}"
+    fi
+done
+
+# ==============================================================================
+# SECURITY CONSIDERATIONS
+# ==============================================================================
+# 1. COMMAND INJECTION VIA FILENAME: If a filename is passed containing shell 
+#    metacharacters, the use of $(cat "$arg") could be exploited. Ensure 
+#    proper quoting and consider path sanitization.
+# 2. RESOURCE EXHAUSTION (DoS): A large file provided to the script could 
+#    trigger hundreds of massive downloads, potentially filling the disk 
+#    partition (root partition risk) or exhausting network bandwidth.
+# 3. UNVERIFIED DOWNLOADS: The script pulls models from the Ollama registry. 
+#    In high-security environments, model integrity/hashes should be verified 
+#    before pulling to prevent "model poisoning."
+# 4. ERROR HANDLING: The use of 'set -e' is good for safety but may kill the 
+#    entire batch if a single model fails (e.g., 404 error). For automation, 
+#    consider a more granular error-recovery logic.
+# 5. INPUT SANITIZATION: tr '\n' ' ' is used to flatten files; ensure input 
+#    files do not contain malicious escape sequences that could affect the zsh 
+#    array expansion.
+# ==============================================================================

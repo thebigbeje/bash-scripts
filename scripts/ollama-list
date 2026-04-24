@@ -1,0 +1,79 @@
+#!/bin/zsh
+################################################################################
+# Script Name:       ollama-extract
+# Description:       Automates the extraction of locally installed AI model 
+#                    names from Ollama into a structured inventory file.
+# Author:            Stefan
+# Version:           1.0
+# Last Modified:     2026-04-24
+# Dependencies:      zsh, ollama, awk, column
+# Hardware:          Requires Ollama daemon to be running
+################################################################################
+
+# ==============================================================================
+# FUNCTIONALITY OVERVIEW
+# ==============================================================================
+# 1. Sets up a CLI interface with support for custom output filenames via flags.
+# 2. Interfaces with the Ollama binary to list all locally pulled LLM models.
+# 3. Pipes raw output through 'column' for tabular alignment and 'awk' for 
+#    precise field extraction (skipping headers).
+# 4. Provides visual feedback using ANSI color codes for success/error states.
+# 5. Implements exit code checking to verify the integrity of the save operation.
+# ==============================================================================
+
+# Define color variables for standardized CLI feedback
+WHITE='\033[1;37m'
+GREEN='\033[1;32m'
+RED='\033[1;31m'
+ORANGE='\033[1;33m'
+RESET='\033[0m'
+
+models_file="ollama-models"  # Default file name for the inventory
+
+# Parse options using getopts for professional CLI argument handling
+while getopts "o:" opt; do
+    case $opt in
+        o)
+            models_file="$OPTARG"
+            break
+            ;;
+        *)
+            echo -e "${RED}Error: Invalid option${RESET}"
+            exit 1
+            ;;
+    esac
+done
+
+echo -e "${WHITE}Extracting model names to ${models_file}${RESET}"
+
+# Run 'ollama list' and parse output with awk
+# Process substitution <(...) is used to feed the formatted table into awk
+# Logic: NR>=2 skips the header line; {print $1} extracts only the Name field
+awk 'NR>=2 {print $1}' <(ollama list | column -t) > "$models_file"
+
+# Check the exit status of the last pipe sequence
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}Successfully saved model names to ${models_file}${RESET}"
+else
+    echo -e "${RED}Failed to extract model names${RESET}"
+fi
+
+exit 0
+
+# ==============================================================================
+# SECURITY CONSIDERATIONS
+# ==============================================================================
+# 1. FILE OVERWRITE RISK: The script overwrites the target file without 
+#    confirmation. In a production environment, implement a check for 
+#    existing files to prevent data loss.
+# 2. COMMAND INJECTION: The $models_file variable is derived from user input 
+#    (-o flag). While redirected safely here, using this variable in 'eval' 
+#    or as part of a more complex command could lead to injection.
+# 3. PATH TRAVERSAL: A user could provide -o "../../etc/passwd". Ensure 
+#    the script has limited write permissions or sanitize the filename path.
+# 4. SERVICE DEPENDENCY: The script assumes 'ollama' is in the $PATH. For 
+#    security-critical automation, use absolute paths to prevent PATH masking 
+#    attacks.
+# 5. DATA EXPOSURE: If models are named using sensitive project tags, the 
+#    resulting file should be protected with appropriate Unix permissions.
+# ==============================================================================

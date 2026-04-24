@@ -1,0 +1,20 @@
+#!/bin/zsh
+
+mon="$(ifconfig|grep wlan0mon)"
+  # grep: Filter output based on pattern matching
+
+if [[ $mon = "" ]]; then
+	sudo systemctl stop ModemManager.service 2>/dev/null
+	sudo systemctl stop avahi-daemon.service 2>/dev/null
+	sudo systemctl stop wpa_supplicant.service 2>/dev/null
+	sudo systemctl stop NetworkManager.service 2>/dev/null
+	sudo airmon-ng check kill
+	sudo airmon-ng start wlan0
+else
+	sudo airmon-ng stop wlan0mon
+	sudo systemctl start ModemManager.service 2>/dev/null
+	sudo systemctl start avahi-daemon.service 2>/dev/null
+    sudo systemctl start wpa_supplicant.service 2>/dev/null
+    sudo systemctl start NetworkManager.service 2>/dev/null
+#	nrs
+fi

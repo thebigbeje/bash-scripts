@@ -1,0 +1,84 @@
+#!/bin/zsh
+################################################################################
+# Script Name:       proxy-checker
+# Description:       Automated validation utility for HTTP proxies. Tests 
+#                    connectivity by attempting to fetch a known resource 
+#                    (google.com) through each proxy provided in an input list.
+# Author:            Stefan
+# Version:           1.0
+# Last Modified:     2026-04-24
+# Dependencies:      zsh, wget, sed, grep
+# Hardware:          Requires outbound network access on tested proxy ports
+################################################################################
+
+# ==============================================================================
+# FUNCTIONALITY OVERVIEW
+# ==============================================================================
+# 1. Reads a list of proxies from an input file (expected format: IP:PORT).
+# 2. Iteratively parses each line using Regex (sed) to isolate IP and Port.
+# 3. Uses 'wget' with specific flags for proxy testing:
+#    - -q: Quiet mode (minimal output).
+#    - -t1: Single retry attempt.
+#    - -T10: 10-second timeout to avoid hanging on dead proxies.
+#    - -e use_proxy=on: Forces proxy engine activation.
+# 4. Validates success by checking for the existence of the downloaded 'index.html'.
+# 5. Logs functional proxies to 'good.list' and cleans up temporary files.
+# ==============================================================================
+
+red='\033[1;31m'
+green='\033[1;32m'
+yellow='\033[0;33m'
+nc='\033[0m'
+
+# Check if an input file was provided as a positional argument
+if [[ $@ != "" ]];then
+    while read line; do
+        # Extract IP address: selects everything before the colon
+        ip=$(echo $line | sed -E 's/:.+//g')
+        
+        # Extract Port: selects everything after the colon
+        port=$(echo $line | sed -E 's/.+://g')
+        
+        echo -----------------------
+        echo "${yellow}TESTING${nc}"
+        echo "IP: $ip"
+        echo "Port: $port"
+        
+        # Attempt to reach google.com through the current proxy line
+        # Redirecting wget's output via pipe to grep for validation
+        wget "google.com" -q -t1 -T10 -e use_proxy=on -e http_proxy=$line | grep "index.html"
+        
+        # Check if the file was successfully downloaded
+        if [[ -f "index.html" ]];then
+            echo "${green}WORKING${nc}"
+            # Append verified proxy to the known-good inventory
+            echo $line >> good.list
+            rm index.html
+        else
+            echo "${red}FAILED${nc}"
+        fi
+        echo "-----------------------"
+    done < $@
+else
+    echo "No input files to test!"
+fi
+
+# ==============================================================================
+# SECURITY CONSIDERATIONS
+# ==============================================================================
+# 1. SSRF RISK: Using a proxy checker can inadvertently be used for Server-Side 
+#    Request Forgery (SSRF) if an attacker provides internal IP addresses (e.g., 
+#    169.254.169.254) to probe local network services.
+# 2. PRIVACY & TRACKING: Fetching 'google.com' through third-party proxies 
+#    exposes your testing intent and potentially your local metadata to the 
+#    proxy owners. Use a generic, non-tracking endpoint for testing.
+# 3. INPUT VALIDATION: The script assumes a strict 'IP:PORT' format. Lines with 
+#    unexpected characters or malformed logic could cause 'sed' or 'wget' to 
+#    behave unpredictably.
+# 4. FILE SYSTEM HYGIENE: The script deletes 'index.html' but does not check 
+#    if it existed prior to execution. It could accidentally delete a legitimate 
+#    local file if the proxy test happens to run in a web root directory.
+# 5. OUTPUT LOGGING: 'good.list' is created in the current working directory. 
+#    In an automated pipeline, ensure the script has appropriate write 
+#    permissions and that the log file is not publicly accessible via a web server.
+# ==============================================================================

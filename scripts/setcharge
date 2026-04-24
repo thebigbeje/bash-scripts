@@ -1,0 +1,99 @@
+#!/bin/bash
+################################################################################
+# Script Name:       setcharge
+# Description:       Configure laptop battery charging thresholds via sysfs
+#                    to extend battery lifespan through selective charging
+# Author:            Stefan
+# Version:           1.0
+# Last Modified:     2026-04-24
+# Dependencies:      bash, sudo, sysfs (kernel module)
+# Hardware:          Requires: /sys/class/power_supply/BAT0/ (Linux battery interface)
+################################################################################
+
+# ==============================================================================
+# FUNCTIONALITY OVERVIEW
+# ==============================================================================
+# Manages laptop battery charging thresholds to optimize battery health.
+# Linux kernel exposes battery charge control via sysfs:
+#   - charge_control_start_threshold: Battery starts charging at this %
+#   - charge_control_end_threshold: Battery stops charging at this %
+#
+# Usage:
+#   setcharge                  # Use defaults (start=75%, stop=81%)
+#   setcharge 20 80            # Set range: 20% start, 80% stop
+#   setcharge 50               # Set single threshold (50-51%)
+# ==============================================================================
+
+# Default battery charge thresholds (conservative for battery longevity)
+start=75    # Battery starts charging when below 75%
+stop=81     # Battery stops charging when above 81%
+
+# Parse command-line arguments
+if [ $# -eq 2 ]; then
+    # Two arguments: setcharge START STOP
+    start=$1
+    stop=$(($2+1))  # Adjust for sysfs interface behavior
+elif [ $# -eq 1 ]; then
+    # One argument: setcharge TARGET_PERCENT
+    stop=$(($1+1))
+    start=$((stop-1))
+fi
+
+# Function: Constrain value to min/max range using arithmetic comparison
+# Prevents invalid sysfs values that would cause kernel errors
+# Logic: If x < min, return min; if x > max, return max; else return x
+constrain() {
+    local x="$1"
+    local min="$2"
+    local max="$3"
+    if [ "$x" -lt "$min" ]; then
+        echo $min
+    elif [ "$x" -gt "$max" ]; then
+        echo $max
+    else
+        echo $x
+    fi
+}
+
+# Constrain values to valid battery percentage range (1-100%)
+start=$(constrain $start 1 99)
+stop=$(constrain $stop 2 100)
+
+# Ensure start threshold is always lower than stop threshold
+if ((start >= stop)); then
+    start=$((stop-1))
+    echo start > stop  # Debug output
+fi
+
+# Read current start threshold to determine write order
+old_start=$(cat /sys/class/power_supply/BAT0/charge_control_start_threshold)
+
+# Write thresholds in correct order to avoid sysfs conflicts
+# If new stop > old start: write stop first, then start
+if((stop>old_start)); then
+    echo "$stop" | sudo tee /sys/class/power_supply/BAT0/charge_control_end_threshold > /dev/null
+    echo "$start" | sudo tee /sys/class/power_supply/BAT0/charge_control_start_threshold > /dev/null
+else
+    # If new stop <= old start: write start first, then stop (avoid conflict)
+    echo "$start" | sudo tee /sys/class/power_supply/BAT0/charge_control_start_threshold > /dev/null
+    echo "$stop" | sudo tee /sys/class/power_supply/BAT0/charge_control_end_threshold > /dev/null
+fi
+
+# Display confirmation with actual sysfs values
+echo "Charge control thresholds set: Start=$(cat /sys/class/power_supply/BAT0/charge_control_start_threshold), Stop=$(cat /sys/class/power_supply/BAT0/charge_control_end_threshold)"
+
+# ==============================================================================
+# SECURITY CONSIDERATIONS
+# ==============================================================================
+# 1. PRIVILEGE ESCALATION: Requires sudo. Restrict via sudoers:
+#    stefan ALL=(ALL) NOPASSWD: /usr/bin/tee /sys/class/power_supply/BAT0/*
+# 2. SYSFS PATH HARDCODING: Path /sys/class/power_supply/BAT0/ assumes single
+#    battery. Multi-battery systems should enumerate via /sys/class/power_supply/
+# 3. INPUT VALIDATION: Values are constrained (1-100) but should validate
+#    against hardware capabilities. Some hardware may not support full range.
+# 4. RACE CONDITIONS: Reading old_start then writing may race if another
+#    process modifies thresholds. Consider atomic operations or locking.
+# 5. HARDWARE-SPECIFIC: This only works on Linux systems with ACPI battery
+#    support. MacOS and Windows use different interfaces.
+# ==============================================================================
+

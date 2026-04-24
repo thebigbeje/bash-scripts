@@ -1,0 +1,55 @@
+#!/bin/zsh
+################################################################################
+# Script Name:       whatsmyip
+# Description:       Display external and internal IP addresses across all
+#                    network interfaces (wlan, eth, etc.)
+# Author:            Stefan
+# Version:           1.0
+# Last Modified:     2026-04-24
+# Dependencies:      zsh, curl, ifconfig, ripgrep (rg), awk
+################################################################################
+
+# ==============================================================================
+# FUNCTIONALITY OVERVIEW
+# ==============================================================================
+# Queries three types of IP information:
+#   1. External IP: Public-facing IP from ISP (via ipinfo.io API)
+#   2. Internal wlan0: Private IP on wireless interface
+#   3. Internal eth0: Private IP on Ethernet interface
+#
+# Useful for troubleshooting network connectivity, VPN verification, and
+# determining active network interfaces at a glance.
+# ==============================================================================
+
+# Query public IP from ipinfo.io API
+# Returns: Single IP address (e.g., "203.0.113.42")
+# Security Note: Leaks request to third-party service; consider privacy concerns
+echo External: $(curl -s https://ipinfo.io/ip)
+
+# Extract private IP from wlan0 (wireless interface)
+# Regex Pattern Analysis:
+#   rg -A 1 "wlan0"     : Find line containing "wlan0" and print 1 line after
+#   tail -1              : Take last line (the inet line)
+#   awk -F " " '{print $2}' : Extract 2nd space-separated field (the IP address)
+# Example output: inet 192.168.1.100 netmask 0xffffff00 broadcast 192.168.1.255
+echo Internal wlan: $(ifconfig|rg -A 1 "wlan0"|tail -1|awk -F " " '{print $2}')
+
+# Extract private IP from eth0 (Ethernet interface)
+# Same regex pattern as wlan0 above
+echo Internal eth: $(ifconfig|rg -A 1 "eth0"|tail -1|awk -F " " '{print $2}')
+
+# ==============================================================================
+# SECURITY CONSIDERATIONS
+# ==============================================================================
+# 1. EXTERNAL SERVICE DEPENDENCY: Relies on ipinfo.io API which logs IP lookups
+#    and potentially stores request metadata. Consider GDPR/privacy implications.
+# 2. INFORMATION DISCLOSURE: Exposes private IP addresses to stdout.
+#    Redirect to file with appropriate permissions if sensitive.
+# 3. INTERFACE ASSUMPTIONS: Hardcoded wlan0/eth0 may not exist on all systems.
+#    Consider enumerating via 'ip link show' instead.
+# 4. NETWORK STATE: If interfaces are down/unconfigured, output will be empty
+#    or contain garbage. Add error handling for robustness.
+# 5. CLEARTEXT API: ipinfo.io uses HTTPS but consider proxying through
+#    enterprise DNS/firewall for better tracking and control.
+# ==============================================================================
+

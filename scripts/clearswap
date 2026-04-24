@@ -1,0 +1,65 @@
+#!/bin/zsh
+################################################################################
+# Script Name:       clearswap
+# Description:       System memory and swap optimization utility that recycles
+#                    swap space and drops filesystem caches to free up RAM
+# Author:            Stefan Bejenaru
+# Version:           1.0
+# Last Modified:     2026-04-24
+# Dependencies:      zsh, sudo, sysctl, notify-send, qram utility
+################################################################################
+
+# ==============================================================================
+# FUNCTIONALITY OVERVIEW
+# ==============================================================================
+# This script optimizes system memory by:
+#   1. Disabling all swap partitions (writes memory-backed pages to swap)
+#   2. Re-enabling swap partitions (ensures clean swap state)
+#   3. Dropping kernel page caches, dentries, and inodes
+#   4. Displays current memory usage via qram utility
+#   5. Sends desktop notification with memory stats
+#
+# Logic Flow:
+#   swap off -> swap on -> drop caches -> sync -> report usage
+# ==============================================================================
+
+# Disable and re-enable all swap space
+# This forces Linux kernel to reclaim cached pages from swap
+sudo swapoff -a  # Disable all swap devices
+sudo swapon -a   # Re-enable all swap devices
+
+# Drop filesystem caches to free RAM
+# Value 3 = clear page caches, dentries, and inodes
+# WARNING: This causes performance degradation on next file access
+sudo sysctl -w vm.drop_caches=3
+
+# Alternative method (direct write to procfs) - commented out in favor of sysctl
+#sudo su -c "echo 3 >'/proc/sys/vm/drop_caches'"
+
+# Use tee to pipe output through sudo (requires single session)
+echo 3|sudo tee /proc/sys/vm/drop_caches
+
+# Ensure all pending I/O operations complete
+sync
+
+# Query current RAM usage from qram utility
+val=$(/home/stefan/programs/qram)
+echo "RAM manager"
+echo "$val used"
+
+# Send desktop notification with RAM usage
+notify-send -a "RAM manager" -t 2200 -e "$val used"
+
+# ==============================================================================
+# SECURITY CONSIDERATIONS
+# ==============================================================================
+# 1. PRIVILEGE ESCALATION: Requires sudo access. Ensure sudoers file limits
+#    this script's execution to minimize privilege exposure.
+# 2. CACHE DROPPING RISK: Dropping caches degrades performance significantly.
+#    Only use when necessary and during low-activity periods.
+# 3. DATA LOSS: Not a concern as caches are ephemeral, but I/O intensive
+#    operations may experience temporary delays.
+# 4. SWAP THRASHING: Re-enabling swap can cause disk thrashing if memory
+#    pressure is high. Monitor system load before execution.
+# ==============================================================================
+

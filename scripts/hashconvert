@@ -1,0 +1,8 @@
+#!/bin/zsh
+
+f=$(/usr/bin/ls|rg -e ".*\.cap"|head -1)
+tmp_pcap="${f%.*}.pcap"
+editcap $f $tmp_pcap
+hcxpcapngtool -o "${f%.*}.hc22000" $tmp_pcap
+rm $tmp_pcap
+unset f tmp_pcap

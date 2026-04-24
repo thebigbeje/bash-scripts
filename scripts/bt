@@ -1,0 +1,145 @@
+#!/bin/zsh
+################################################################################
+# Script Name:       bt-manager
+# Description:       Advanced Bluetooth management utility that orchestrates 
+#                    systemd service states and device-specific connections 
+#                    (ATH/RCA) via bluetoothctl.
+# Author:            Stefan
+# Version:           1.0
+# Last Modified:     2026-04-24
+# Dependencies:      zsh, systemd, bluez (bluetoothctl), ripgrep (rg), sed
+# Hardware:          Requires a Linux-compatible Bluetooth controller
+################################################################################
+
+# ==============================================================================
+# FUNCTIONALITY OVERVIEW
+# ==============================================================================
+# 1. Inspects the current state of the bluetooth.service via systemctl.
+# 2. Implements a "toggle" logic: if no arguments are passed, it flips the 
+#    service state between 'running' and 'dead'.
+# 3. Identifies the currently connected device name using string manipulation 
+#    (sed) to clean up raw bluetoothctl telemetry.
+# 4. Provides a CLI interface for granular control:
+#    - 'stat': Displays connection status and device names.
+#    - 'on/off': Explicitly manages the service and controller power.
+#    - 'ath/rca': Automates the pairing/connection sequence for specific 
+#      hardware MAC addresses (headphones/receivers).
+# ==============================================================================
+
+red='\033[1;31m'
+green='\033[1;32m'
+nc='\033[0m'
+
+# Determine service status using ripgrep for precise state matching
+dead=$(sudo systemctl status bluetooth.service | rg "Active:" | rg -o "dead")
+running=$(sudo systemctl status bluetooth.service | rg "Active:" | rg -o "running")
+
+# Logic: Service is currently OFF
+if [[ $dead = "dead" ]];then
+    if [[ $1 = "" ]];then
+        # Toggle behavior: Start service and power up the controller
+        sudo systemctl start bluetooth.service
+        bluetoothctl power on >/dev/null
+        echo "Bluetooth ${green}ON${nc}"
+        exit
+    else
+        echo "Bluetooth is turned off"
+        exit
+    fi
+fi
+
+# Logic: Service is currently ON
+if [[ $running = "running" ]];then
+    if [[ $1 = "" ]];then
+        # Toggle behavior: Power down controller and stop systemd service
+        bluetoothctl power off >/dev/null
+        sudo systemctl stop bluetooth.service
+        echo "Bluetooth ${red}OFF${nc}"
+        exit
+    fi
+fi
+
+# Detect if a device is actively connected and sanitize the output string
+if [[ "$(bluetoothctl info)" = "Missing device address argument" ]];then
+    c="NULL"
+else
+    # Extracts the "Name:" field, trims whitespace and special characters
+    c="$(bluetoothctl info | head -2 | tail -1 | sed 's/Name://' | sed 's/^\s\+//' | sed 's/\s*$//g')"
+fi
+
+# Argument Handling (Help and Commands)
+if [[ $1 = "help" ]];then
+        echo "Specify command or device to connect (ath/rca)"
+else
+    case $1 in
+        "stat")
+            if [[ $c = "NULL" ]];then
+                echo "No device connected"
+            else
+                echo "Connected device: $c"
+            fi
+        ;;
+        "off")
+            bluetoothctl power off >/dev/null
+            sudo systemctl stop bluetooth.service
+            echo Power off successful
+        ;;
+        "on")
+            sudo systemctl start bluetooth.service
+            bluetoothctl power on >/dev/null
+            echo Power on successful
+        ;;
+        "d")
+            bluetoothctl disconnect >/dev/null
+            echo Disconnect successful
+        ;;
+        "ath")
+            # Automation for specific device (MAC: 00:0A:45:0B:47:D7)
+            if [[ $c = "NULL" ]];then
+                bluetoothctl power on >/dev/null
+                ath="$(bluetoothctl connect 00:0A:45:0B:47:D7)"
+                if [[ "$(echo $ath | tail -1)" = "Connection successful" ]];then
+                    echo "Connection successful"
+                else
+                    echo "Connection failed"
+                fi
+            else
+                echo "Device already connected: $c"
+            fi
+        ;;
+        "rca")
+            # Automation for specific device (MAC: EB:06:EF:26:AA:9F)
+            if [[ $c = "NULL" ]];then
+                bluetoothctl power on >/dev/null
+                rca="$(bluetoothctl connect EB:06:EF:26:AA:9F)"
+                if [[ "$(echo $rca | tail -1)" = "Connection successful" ]];then
+                    echo "Connection successful"
+                else
+                    echo "Connection failed"
+                fi
+            else
+                echo "Device already connected: $c"
+            fi
+        ;;
+    esac
+fi
+
+# ==============================================================================
+# SECURITY CONSIDERATIONS
+# ==============================================================================
+# 1. BLUETOOTH ATTACK SURFACE: Keeping the Bluetooth service 'dead' when not 
+#    in use (as this script allows) is a key hardening practice to prevent 
+#    BlueBorne or BIAS attacks.
+# 2. PRIVILEGE ESCALATION: The script heavily uses 'sudo systemctl'. Ensure 
+#    strict sudoers policies (NOPASSWD only for the specific service) to 
+#    prevent the script from becoming a vector for full root access.
+# 3. MAC ADDRESS EXPOSURE: Hardcoding device MAC addresses (ath/rca) reveals 
+#    information about your hardware ecosystem. In a shared environment, 
+#    this could aid in targeted spoofing or tracking.
+# 4. INSECURE PAIRING: Ensure that the devices connected (ATH/RCA) use Secure 
+#    Connections (SC) with MITM protection, as the script automates the 
+#    connection process without manual verification.
+# 5. SUDO IN LOOPS: Running sudo within a script can lead to credential 
+#    caching issues. If the sudo timeout expires mid-execution, the script 
+#    may hang or fail silently.
+# ==============================================================================

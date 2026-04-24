@@ -1,0 +1,20 @@
+#!/bin/zsh
+
+if [[ $1 = "" ]]
+then
+	echo Name a path
+	exit
+else
+	while read line
+	do
+		artist=$(echo $line|awk -F ' - ' '{print $1}')
+		title=$(echo $line|awk -F ' - ' '{print $2}')
+		echo ARTIST: $artist TITLE: $title
+		url="https://api.deezer.com/search?q=artist:'$artist' track:'$title'"
+		wget -q $url -O /tmp/temp_dl 2>/dev/null
+		dl=$(cat /tmp/temp_dl|awk -F ""\"link\"":" '{print $2}'|awk -F "," '{print $1}'|sed 's/\"//g'|sed 's/\\//g')
+		rm /tmp/temp_dl
+		echo $dl
+		deemix $dl
+	done < $1
+fi

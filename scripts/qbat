@@ -1,0 +1,113 @@
+#!/usr/bin/bash
+################################################################################
+# Script Name:       qbat (Quick Battery)
+# Description:       Display detailed battery status with remaining time and
+#                    charging state via ACPI interface
+# Author:            Stefan
+# Version:           1.0
+# Last Modified:     2026-04-24
+# Dependencies:      bash, acpi, ripgrep (rg), awk, notify-send
+# Hardware:          Requires: ACPI battery support (/proc/acpi/battery/ or acpi -b)
+################################################################################
+
+# ==============================================================================
+# FUNCTIONALITY OVERVIEW
+# ==============================================================================
+# Parses ACPI battery status to extract:
+#   1. Charging state (Charging/Discharging/Full/Not charging)
+#   2. Battery percentage (0-100%)
+#   3. Remaining time (hours:minutes:seconds format)
+#
+# Formats readable output like: "Discharging (45%), remaining 3 hours 25 minutes"
+# Sends desktop notification for battery status awareness.
+#
+# Logic Flow:
+#   acpi -b -> parse status,percentage,time -> format output -> notify
+# ==============================================================================
+
+# Get raw ACPI battery string
+# Example: "Battery 0: Discharging, 45%, 03:25:42 remaining"
+input_string=$(acpi -b)
+
+# REGEX PATTERNS EXPLAINED:
+# \=============================================================
+
+# Extract charging status (Charging/Discharging/Full/Not charging)
+# Regex: 'Battery\s\d+:\s([^,]*)'
+#   Battery\s        : Match literal "Battery" + whitespace
+#   \d+              : Match one or more digits (battery index)
+#   :\s              : Match colon and whitespace
+#   ([^,]*)          : Capture group: match anything except comma (status text)
+# Result: "Charging" or "Discharging" etc.
+status=$(echo "$input_string" | rg -oP 'Battery\s\d+:\s([^,]*)' | sed -E 's/Battery\s[[:digit:]]+:\s//g')
+
+# Extract battery percentage
+# Regex: '\d+(?=%)'
+#   \d+    : Match one or more digits
+#   (?=%)  : Positive lookahead for % (don't capture the %)
+# Result: "45" (without the % symbol)
+percentage=$(echo "$input_string" | rg -oP '\d+(?=%)')
+
+# Extract remaining time (hours:minutes:seconds)
+# Regex: '\d+:\d+:\d+'
+#   \d+  : One or more digits (hours/minutes/seconds)
+#   :    : Literal colon separator
+# Result: "03:25:42"
+remaining_time=$(echo "$input_string" | rg -oP '\d+:\d+:\d+')
+
+# Parse time components and remove leading zeros
+# awk logic: -F':' sets field separator to colon
+#   print $1+0  : Takes first field and adds 0 (removes leading zeros)
+#   print $2+0  : Takes second field (same method)
+hours=$(echo "$remaining_time" | awk -F':' '{print $1+0}')
+minutes=$(echo "$remaining_time" | awk -F':' '{print $2+0}')
+
+# Build formatted output string based on charging state
+if [[ $status != "Not charging" ]]; then
+    if [[ $status == "Discharging" ]]; then
+        output_string="$status ($percentage%), remaining"
+    elif [[ $status == "Charging" ]]; then
+        output_string="$status ($percentage%), to full in"
+    elif [[ $status == "Full" ]]; then
+        output_string="$status (100%)"
+    fi
+    
+    # Append hours (only if non-zero to avoid "0 hours")
+    if [[ $hours -ne 0 ]]; then
+        output_string+=" $hours hour(s)"
+    fi
+    
+    # Append minutes (only if non-zero)
+    if [[ $minutes -ne 0 ]]; then
+        output_string+=" $minutes minute(s)"
+    fi
+else
+    # Battery not charging (AC adapter connected, battery full)
+    output_string="$status ($percentage%)"
+fi
+
+# Uncomment for debugging: verify regex extraction
+# echo status:$status
+# echo percentage:$percentage
+# echo remaining_time:$remaining_time
+# echo hours:$hours
+# echo minutes:$minutes
+
+echo $output_string
+notify-send -a "Battery" -t 2200 -e "$output_string"
+
+# ==============================================================================
+# SECURITY CONSIDERATIONS
+# ==============================================================================
+# 1. INFORMATION DISCLOSURE: Battery status can reveal device usage patterns.
+#    Notifications are visible on shared screens; consider privacy impact.
+# 2. ACPI DEPENDENCY: Requires acpi command and kernel support. Some systems
+#    use UPower or other battery interfaces. Add fallback detection.
+# 3. REGEX FRAGILITY: ACPI output format may vary by kernel version and
+#    manufacturer. Regex patterns may break unexpectedly.
+# 4. TIME FORMAT ASSUMPTIONS: Assumes HH:MM:SS format. Verify with your
+#    system output: run 'acpi -b' and inspect format.
+# 5. NOTIFICATION EXPOSURE: notify-send broadcasts notifications on X11/Wayland.
+#    Ensure notification daemon doesn't log to insecure locations.
+# ==============================================================================
+
